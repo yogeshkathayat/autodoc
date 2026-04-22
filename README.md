@@ -1,9 +1,62 @@
-# autodocai
+<p align="center">
+  <img src="assets/logo.svg" alt="autodoc.ai logo" width="200" />
+</p>
 
-One-command, AI-driven documentation automation for any git repo. Detects your framework, generates a manifest, installs git hooks, and keeps docs in sync with code changes.
+<h1 align="center">autodoc.ai</h1>
+
+<p align="center">
+  One-command, AI-driven documentation automation for any git repo.<br/>
+  Detects your framework, scans feature modules, generates per-module docs, and keeps them in sync with code changes.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/autodocai"><img src="https://img.shields.io/npm/v/autodocai.svg" alt="npm version" /></a>
+  <a href="https://github.com/yogeshkathayat/autodoc/actions"><img src="https://github.com/yogeshkathayat/autodoc/actions/workflows/test.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/yogeshkathayat/autodoc/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
+</p>
+
+---
+
+## Installation
+
+### Quick run (no install)
 
 ```bash
 npx autodocai init
+```
+
+### Global install
+
+```bash
+# npm
+npm install -g autodocai
+
+# yarn
+yarn global add autodocai
+
+# pnpm
+pnpm add -g autodocai
+
+# bun
+bun add -g autodocai
+```
+
+### Per-project (recommended)
+
+```bash
+npm install --save-dev autodocai
+```
+
+Then use via `npx autodoc` or add scripts to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "docs:init": "autodoc init",
+    "docs:update": "autodoc update",
+    "docs:check": "autodoc check"
+  }
+}
 ```
 
 ## Features
@@ -376,7 +429,7 @@ Contributions are welcome. To contribute:
 ### Development Setup
 
 ```bash
-git clone https://github.com/yogesh/autodoc.git
+git clone https://github.com/yogeshkathayat/autodoc.git
 cd autodoc
 npm install
 npm run build
@@ -408,8 +461,8 @@ MIT - see [LICENSE](LICENSE) for details.
 ## Links
 
 - [npm package](https://www.npmjs.com/package/autodocai)
-- [GitHub repository](https://github.com/yogesh/autodoc)
-- [Issue tracker](https://github.com/yogesh/autodoc/issues)
+- [GitHub repository](https://github.com/yogeshkathayat/autodoc)
+- [Issue tracker](https://github.com/yogeshkathayat/autodoc/issues)
 - [Claude Code](https://claude.ai/download)
 - [Anthropic](https://www.anthropic.com)
 

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="docGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.95" />
+      <stop offset="100%" style="stop-color:#e0e7ff;stop-opacity:0.95" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#312e81" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="92" fill="url(#bgGrad)" />
+
+  <!-- Document shape -->
+  <g filter="url(#shadow)">
+    <path d="M 60 45 L 120 45 L 145 70 L 145 155 L 60 155 Z" fill="url(#docGrad)" rx="4" />
+    <!-- Folded corner -->
+    <path d="M 120 45 L 120 70 L 145 70 Z" fill="#c7d2fe" />
+  </g>
+
+  <!-- Doc lines representing text -->
+  <rect x="75" y="85" width="50" height="4" rx="2" fill="#6366f1" opacity="0.6" />
+  <rect x="75" y="97" width="40" height="4" rx="2" fill="#6366f1" opacity="0.4" />
+  <rect x="75" y="109" width="55" height="4" rx="2" fill="#6366f1" opacity="0.6" />
+  <rect x="75" y="121" width="35" height="4" rx="2" fill="#6366f1" opacity="0.4" />
+  <rect x="75" y="133" width="45" height="4" rx="2" fill="#6366f1" opacity="0.5" />
+
+  <!-- AI sparkle/bolt -->
+  <g transform="translate(130, 38)">
+    <!-- Sparkle shape -->
+    <path d="M 12 0 L 14.5 9.5 L 24 12 L 14.5 14.5 L 12 24 L 9.5 14.5 L 0 12 L 9.5 9.5 Z"
+          fill="#fbbf24" />
+    <path d="M 22 18 L 23.2 22 L 27 23.2 L 23.2 24.4 L 22 28 L 20.8 24.4 L 17 23.2 L 20.8 22 Z"
+          fill="#fbbf24" opacity="0.7" />
+  </g>
+
+  <!-- Sync arrows (circular) -->
+  <g transform="translate(52, 130)" opacity="0.9">
+    <path d="M 8 14 A 10 10 0 0 1 22 8" stroke="#fbbf24" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <polygon points="22,5 25,9 19,9" fill="#fbbf24"/>
+    <path d="M 22 16 A 10 10 0 0 1 8 22" stroke="#fbbf24" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <polygon points="8,25 5,21 11,21" fill="#fbbf24"/>
+  </g>
+</svg>
