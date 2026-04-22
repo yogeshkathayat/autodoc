@@ -1,40 +1,53 @@
 #!/usr/bin/env sh
 
-# Post-merge hook for automatic documentation updates
-# Runs after: git pull, git merge
+# autodoc.ai post-merge hook
+# Checks if pulled changes affect documented code and reminds you to update docs.
+# This hook is FAST — no AI calls, just glob matching against the manifest.
 
-# Check if npx is available
-if ! command -v npx &> /dev/null; then
-  echo "npx not found, skipping autodoc update"
-  exit 0
-fi
-
-# Check if hook is disabled via git config
+# Check if hook is disabled
 if [ "$(git config --get hooks.skip-autodoc)" = "true" ]; then
-  echo "autodoc hook disabled via git config (hooks.skip-autodoc=true)"
   exit 0
 fi
 
-# Get the list of files changed in the merge
-# ORIG_HEAD points to the commit before the merge
-CHANGED_FILES=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null)
-
-if [ -z "$CHANGED_FILES" ]; then
-  # No files changed, nothing to do
+# Ensure manifest exists
+MANIFEST="docs/_manifest.json"
+if [ ! -f "$MANIFEST" ]; then
   exit 0
 fi
 
-echo "Checking for documentation updates..."
-
-# Run autodoc update (non-blocking)
-# Use --no-install to avoid installing if package isn't already available
-if npx --no-install autodocai update 2>/dev/null; then
-  echo "Documentation update complete"
-else
-  echo "Note: autodoc update skipped (package not installed or no updates needed)"
-  echo "To install: npm install --save-dev autodocai"
-  echo "To disable this hook: git config hooks.skip-autodoc true"
+# Get changed files from the merge
+CHANGED=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null)
+if [ -z "$CHANGED" ]; then
+  exit 0
 fi
 
-# Always exit 0 to avoid blocking the merge
+# Quick check: do any changed files match watch patterns in the manifest?
+# Use node one-liner for fast glob matching (no external deps)
+NEEDS_UPDATE=$(node -e "
+const fs = require('fs');
+const path = require('path');
+try {
+  const m = JSON.parse(fs.readFileSync('$MANIFEST', 'utf8'));
+  const changed = \`$CHANGED\`.split('\n').filter(Boolean);
+  const ignore = (m.ignore || []);
+  const hit = m.mappings.some(mapping =>
+    mapping.watches.some(pattern => {
+      const re = new RegExp(pattern.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*'));
+      return changed.some(f => re.test(f) && !ignore.some(ip => {
+        const ir = new RegExp(ip.replace(/\*\*/g, '.*').replace(/\*/g, '[^/]*'));
+        return ir.test(f);
+      }));
+    })
+  );
+  process.stdout.write(hit ? '1' : '0');
+} catch(e) { process.stdout.write('0'); }
+" 2>/dev/null)
+
+if [ "$NEEDS_UPDATE" = "1" ]; then
+  echo ""
+  echo "  📄 autodoc: pulled changes affect documented code."
+  echo "  Run 'autodoc update' to refresh docs."
+  echo ""
+fi
+
 exit 0

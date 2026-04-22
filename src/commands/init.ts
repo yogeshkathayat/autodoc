@@ -91,7 +91,7 @@ async function runInit(options: InitOptions): Promise<void> {
     log('  docs/_manifest.json');
     log('  .claude/commands/update-docs.md');
     log('  .github/workflows/docs-drift.yml');
-    log('  .husky/post-merge');
+    log('  .git/hooks/post-merge (fast check, no AI calls)');
     log('');
 
     const proceed = await confirm({
@@ -189,7 +189,7 @@ async function runInit(options: InitOptions): Promise<void> {
     },
     {
       src: path.join(templatesDir, '_common', '.husky', 'post-merge'),
-      dest: path.join(repoRoot, '.husky', 'post-merge'),
+      dest: path.join(repoRoot, '.git', 'hooks', 'post-merge'),
     },
   ];
 
@@ -203,11 +203,11 @@ async function runInit(options: InitOptions): Promise<void> {
     }
   }
 
-  // 6. Make .husky/post-merge executable
-  const huskyHookPath = path.join(repoRoot, '.husky', 'post-merge');
-  if (!options.dryRun && (await fileExists(huskyHookPath))) {
-    await chmod(huskyHookPath, 0o755);
-    debug('Made .husky/post-merge executable');
+  // 6. Make git hook executable
+  const hookPath = path.join(repoRoot, '.git', 'hooks', 'post-merge');
+  if (!options.dryRun && (await fileExists(hookPath))) {
+    await chmod(hookPath, 0o755);
+    debug('Made .git/hooks/post-merge executable');
   }
 
   // 7. Run adapter preflight and bootstrap

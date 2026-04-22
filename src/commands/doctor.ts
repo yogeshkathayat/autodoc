@@ -123,20 +123,21 @@ async function runDoctor(): Promise<void> {
   }
 
   // 3. Check if git hook is installed
-  const hookPath = path.join(repoRoot, '.husky', 'post-merge');
-  const hookExists = await fileExists(hookPath);
+  const gitHookPath = path.join(repoRoot, '.git', 'hooks', 'post-merge');
+  const huskyHookPath = path.join(repoRoot, '.husky', 'post-merge');
+  const hookExists = (await fileExists(gitHookPath)) || (await fileExists(huskyHookPath));
 
   if (hookExists) {
     checks.push({
       name: 'Git hook',
       status: 'pass',
-      message: '.husky/post-merge is installed',
+      message: 'post-merge hook is installed',
     });
   } else {
     checks.push({
       name: 'Git hook',
       status: 'warn',
-      message: '.husky/post-merge not found. Auto-updates on merge will not work.',
+      message: 'post-merge hook not found. Run "autodoc init" to install.',
     });
   }
 
