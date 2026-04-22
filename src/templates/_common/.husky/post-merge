@@ -1,0 +1,40 @@
+#!/usr/bin/env sh
+
+# Post-merge hook for automatic documentation updates
+# Runs after: git pull, git merge
+
+# Check if npx is available
+if ! command -v npx &> /dev/null; then
+  echo "npx not found, skipping autodoc update"
+  exit 0
+fi
+
+# Check if hook is disabled via git config
+if [ "$(git config --get hooks.skip-autodoc)" = "true" ]; then
+  echo "autodoc hook disabled via git config (hooks.skip-autodoc=true)"
+  exit 0
+fi
+
+# Get the list of files changed in the merge
+# ORIG_HEAD points to the commit before the merge
+CHANGED_FILES=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null)
+
+if [ -z "$CHANGED_FILES" ]; then
+  # No files changed, nothing to do
+  exit 0
+fi
+
+echo "Checking for documentation updates..."
+
+# Run autodoc update (non-blocking)
+# Use --no-install to avoid installing if package isn't already available
+if npx --no-install autodocai update 2>/dev/null; then
+  echo "Documentation update complete"
+else
+  echo "Note: autodoc update skipped (package not installed or no updates needed)"
+  echo "To install: npm install --save-dev autodocai"
+  echo "To disable this hook: git config hooks.skip-autodoc true"
+fi
+
+# Always exit 0 to avoid blocking the merge
+exit 0

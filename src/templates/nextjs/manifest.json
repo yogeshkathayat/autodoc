@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/autodocai/schema/manifest.schema.json",
+  "version": "1.0",
+  "project": "{{PROJECT_NAME}}",
+  "framework": "nextjs",
+  "adapter": "claude-code",
+  "description": "Auto-generated feature-based documentation manifest for Next.js project",
+  "mappings": [
+    {
+      "id": "architecture-overview",
+      "doc": "docs/architecture-overview.md",
+      "watches": ["app/layout.tsx", "app/layout.ts", "next.config.*", "middleware.ts"],
+      "purpose": "High-level application architecture: route structure, layouts, middleware, data fetching patterns, API routes overview, external integrations. Include Mermaid diagrams.",
+      "strategy": "rewrite"
+    }
+  ],
+  "ignore": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/node_modules/**", ".next/**"]
+}

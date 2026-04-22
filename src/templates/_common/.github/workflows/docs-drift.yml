@@ -1,0 +1,64 @@
+name: Documentation Drift Detection
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check-docs-drift:
+    name: Check for documentation drift
+    runs-on: ubuntu-latest
+
+    # Skip if PR has the docs:skip label or commit message contains [docs-skip]
+    if: |
+      !contains(github.event.pull_request.labels.*.name, 'docs:skip') &&
+      !contains(github.event.pull_request.title, '[docs-skip]')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get changed files
+        id: changed-files
+        run: |
+          # Get the list of changed files in this PR
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
+          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "Changed files: $CHANGED_FILES"
+
+      - name: Check documentation drift
+        if: steps.changed-files.outputs.files != ''
+        run: |
+          # Run autodoc check for the changed source files
+          npx autodocai check --src ${{ steps.changed-files.outputs.files }}
+
+      - name: Comment on PR (if check failed)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ **Documentation Drift Detected**\n\n' +
+                    'Source files have changed but documentation may be out of sync.\n\n' +
+                    'To update documentation:\n' +
+                    '1. Run `/update-docs` in Claude Code\n' +
+                    '2. Or run `npx autodocai update` locally\n' +
+                    '3. Review and commit the changes\n\n' +
+                    'To skip this check, add the `docs:skip` label or include `[docs-skip]` in the PR title.'
+            })

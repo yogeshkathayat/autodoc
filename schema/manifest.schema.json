@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://anthropic.com/schemas/autodoc/manifest.schema.json",
+  "title": "Autodoc Manifest",
+  "description": "Configuration for autodocai - AI-driven documentation automation",
+  "type": "object",
+  "required": ["version", "project", "framework", "adapter", "mappings"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference for editor support"
+    },
+    "version": {
+      "type": "string",
+      "enum": ["1.0"],
+      "description": "Manifest schema version"
+    },
+    "project": {
+      "type": "string",
+      "description": "Project name",
+      "minLength": 1
+    },
+    "framework": {
+      "type": "string",
+      "enum": ["nestjs", "laravel", "nextjs", "generic"],
+      "description": "Framework used in the project"
+    },
+    "adapter": {
+      "type": "string",
+      "description": "Adapter to use for documentation generation (only 'claude-code' supported in v1)",
+      "enum": ["claude-code"]
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional project description"
+    },
+    "mappings": {
+      "type": "array",
+      "description": "Mappings between source files and documentation",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "doc", "watches", "purpose"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "Unique identifier in kebab-case"
+          },
+          "doc": {
+            "type": "string",
+            "pattern": "^docs/",
+            "description": "Path to documentation file (must be under docs/)"
+          },
+          "watches": {
+            "type": "array",
+            "description": "Glob patterns to watch for changes",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          },
+          "purpose": {
+            "type": "string",
+            "description": "Description of what this documentation covers",
+            "minLength": 1
+          },
+          "strategy": {
+            "type": "string",
+            "enum": ["surgical", "rewrite"],
+            "default": "surgical",
+            "description": "Update strategy: 'surgical' for targeted edits, 'rewrite' for full regeneration"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "ignore": {
+      "type": "array",
+      "description": "Glob patterns for files to ignore",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}
