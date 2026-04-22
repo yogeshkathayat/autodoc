@@ -46,7 +46,23 @@ try {
 if [ "$NEEDS_UPDATE" = "1" ]; then
   echo ""
   echo "  📄 autodoc: pulled changes affect documented code."
-  echo "  Run 'autodoc update' to refresh docs."
+
+  # Prompt if running in an interactive terminal
+  if [ -t 0 ]; then
+    printf "  Update docs now? [y/N] "
+    read -r REPLY < /dev/tty 2>/dev/null || REPLY="n"
+    case "$REPLY" in
+      [yY]|[yY][eE][sS])
+        echo ""
+        npx autodocai update 2>&1 || echo "  autodoc update failed. Run 'autodoc update' manually."
+        ;;
+      *)
+        echo "  Skipped. Run 'autodoc update' when ready."
+        ;;
+    esac
+  else
+    echo "  Run 'autodoc update' to refresh docs."
+  fi
   echo ""
 fi
 
