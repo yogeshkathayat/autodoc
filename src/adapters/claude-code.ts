@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { join, relative } from 'node:path';
+import { Minimatch } from 'minimatch';
 import type {
   AIAdapter,
   UpdateInput,
@@ -9,6 +12,9 @@ import type {
 } from './types.js';
 
 const execFileAsync = promisify(execFile);
+
+const MAX_FILE_SIZE = 100 * 1024; // 100KB per file
+const MAX_TOTAL_SIZE = 800 * 1024; // 800KB total source content in prompt
 
 export class ClaudeCodeAdapter implements AIAdapter {
   readonly name = 'claude-code';
@@ -41,7 +47,13 @@ export class ClaudeCodeAdapter implements AIAdapter {
   }
 
   async runUpdate(input: UpdateInput): Promise<UpdateResult> {
-    const prompt = this.buildUpdatePrompt(input);
+    // Pre-read triggering source files
+    const sourceContents = await this.readSourceFiles(
+      input.repoRoot,
+      input.affectedDocs.flatMap(d => d.triggeringFiles)
+    );
+
+    const prompt = this.buildUpdatePrompt(input, sourceContents);
 
     try {
       const { stdout, stderr } = await execFileAsync(
@@ -49,7 +61,7 @@ export class ClaudeCodeAdapter implements AIAdapter {
         [
           '-p', prompt,
           '--allowedTools',
-          'Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*)',
+          'Write,Edit,Glob,Grep',
         ],
         {
           cwd: input.repoRoot,
@@ -70,7 +82,11 @@ export class ClaudeCodeAdapter implements AIAdapter {
   }
 
   async runBootstrap(input: BootstrapInput): Promise<BootstrapResult> {
-    const prompt = this.buildBootstrapPrompt(input);
+    // Pre-read all source files matching watch patterns
+    const filePaths = await this.resolveWatchFiles(input.repoRoot, input.mappings);
+    const sourceContents = await this.readSourceFiles(input.repoRoot, filePaths);
+
+    const prompt = this.buildBootstrapPrompt(input, sourceContents);
 
     try {
       const { stdout, stderr } = await execFileAsync(
@@ -78,19 +94,19 @@ export class ClaudeCodeAdapter implements AIAdapter {
         [
           '-p', prompt,
           '--allowedTools',
-          'Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*)',
+          'Write,Edit',
         ],
         {
           cwd: input.repoRoot,
-          timeout: 600000, // 10 minutes
-          maxBuffer: 20 * 1024 * 1024, // 20MB
+          timeout: 300000, // 5 minutes (down from 10 — no reading needed)
+          maxBuffer: 10 * 1024 * 1024,
         }
       );
 
       return this.parseBootstrapOutput(stdout, stderr, input.mappings);
     } catch (error) {
       if (error instanceof Error && 'killed' in error && error.killed) {
-        throw new Error('Claude CLI execution timed out after 10 minutes');
+        throw new Error('Claude CLI execution timed out after 5 minutes');
       }
       throw new Error(
         `Claude CLI execution failed: ${error instanceof Error ? error.message : String(error)}`
@@ -98,57 +114,164 @@ export class ClaudeCodeAdapter implements AIAdapter {
     }
   }
 
-  private buildUpdatePrompt(input: UpdateInput): string {
+  /**
+   * Resolve watch patterns to actual file paths.
+   */
+  private async resolveWatchFiles(
+    repoRoot: string,
+    mappings: BootstrapInput['mappings']
+  ): Promise<string[]> {
+    const allFiles = new Set<string>();
+
+    for (const mapping of mappings) {
+      for (const pattern of mapping.watches) {
+        const matcher = new Minimatch(pattern);
+        const files = await this.walkDir(repoRoot, repoRoot, matcher);
+        files.forEach(f => allFiles.add(f));
+      }
+    }
+
+    return [...allFiles];
+  }
+
+  /**
+   * Walk directory and return files matching a pattern.
+   */
+  private async walkDir(
+    baseDir: string,
+    currentDir: string,
+    matcher: Minimatch
+  ): Promise<string[]> {
+    const results: string[] = [];
+    try {
+      const entries = await readdir(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = join(currentDir, entry.name);
+        const relPath = relative(baseDir, fullPath);
+
+        // Skip common non-source dirs
+        if (entry.isDirectory()) {
+          if (['node_modules', 'dist', 'build', '.git', 'vendor', 'coverage', '.next'].includes(entry.name)) continue;
+          if (entry.name.includes('.test.') || entry.name.includes('.spec.')) continue;
+          const subFiles = await this.walkDir(baseDir, fullPath, matcher);
+          results.push(...subFiles);
+        } else if (entry.isFile()) {
+          if (relPath.includes('.test.') || relPath.includes('.spec.')) continue;
+          if (matcher.match(relPath)) {
+            results.push(relPath);
+          }
+        }
+      }
+    } catch {
+      // Skip unreadable dirs
+    }
+    return results;
+  }
+
+  /**
+   * Read source files and return their contents, respecting size limits.
+   */
+  private async readSourceFiles(
+    repoRoot: string,
+    filePaths: string[]
+  ): Promise<Map<string, string>> {
+    const contents = new Map<string, string>();
+    let totalSize = 0;
+
+    for (const filePath of filePaths) {
+      if (totalSize >= MAX_TOTAL_SIZE) {
+        break;
+      }
+
+      try {
+        const fullPath = join(repoRoot, filePath);
+        const fileStat = await stat(fullPath);
+
+        if (fileStat.size > MAX_FILE_SIZE) continue;
+        if (fileStat.size === 0) continue;
+
+        const content = await readFile(fullPath, 'utf-8');
+        totalSize += content.length;
+
+        if (totalSize <= MAX_TOTAL_SIZE) {
+          contents.set(filePath, content);
+        }
+      } catch {
+        // Skip unreadable files
+      }
+    }
+
+    return contents;
+  }
+
+  /**
+   * Format source file contents for the prompt.
+   */
+  private formatSourceContents(contents: Map<string, string>): string {
+    if (contents.size === 0) return '';
+
+    const parts: string[] = [
+      `\n\n--- SOURCE FILES (${contents.size} files pre-loaded) ---\n`,
+    ];
+
+    for (const [filePath, content] of contents) {
+      parts.push(`\n### ${filePath}\n\`\`\`\n${content}\n\`\`\`\n`);
+    }
+
+    return parts.join('');
+  }
+
+  private buildUpdatePrompt(input: UpdateInput, sourceContents: Map<string, string>): string {
     const affectedDocsInfo = input.affectedDocs
       .map((doc) => {
         return `- ${doc.id}: ${doc.docPath}
   Purpose: ${doc.purpose}
   Strategy: ${doc.strategy}
-  Watches: ${doc.watches.join(', ')}
   Triggering files: ${doc.triggeringFiles.join(', ')}`;
       })
       .join('\n\n');
 
-    return `Use the /update-docs slash command to update documentation.
+    const sourceSection = this.formatSourceContents(sourceContents);
 
-Changed files (${input.changedFiles.length}):
-${input.changedFiles.map((f) => `- ${f}`).join('\n')}
+    return `Update documentation based on code changes.
 
 Affected documentation (${input.affectedDocs.length}):
 ${affectedDocsInfo}
 
-Manifest path: ${input.manifestPath}
-Repository root: ${input.repoRoot}
+For "surgical" strategy: update only the sections affected by the changed code.
+For "rewrite" strategy: regenerate the entire document.
 
-Please update all affected documentation files according to their strategies:
-- "surgical": Make targeted updates to specific sections
-- "rewrite": Regenerate the entire document
-
-Report which files were updated, skipped, or need review.`;
+Write each updated doc to its path using the Write tool. Preserve any <!-- manual --> sections.
+${sourceSection}
+After writing, output a line for each file: "Updated: <path>" or "Created: <path>"`;
   }
 
-  private buildBootstrapPrompt(input: BootstrapInput): string {
+  private buildBootstrapPrompt(input: BootstrapInput, sourceContents: Map<string, string>): string {
     const mappingsInfo = input.mappings
       .map((mapping) => {
         return `- ${mapping.id}: ${mapping.doc}
-  Purpose: ${mapping.purpose}
-  Strategy: ${mapping.strategy}
-  Watches: ${mapping.watches.join(', ')}`;
+  Purpose: ${mapping.purpose}`;
       })
-      .join('\n\n');
+      .join('\n');
 
-    return `Use the /bootstrap-docs slash command to generate initial documentation.
+    const sourceSection = this.formatSourceContents(sourceContents);
 
-Documentation mappings (${input.mappings.length}):
+    return `Generate documentation from the source code below.
+
+Target: ${input.mappings.map(m => m.doc).join(', ')}
+
+Mappings:
 ${mappingsInfo}
 
-Manifest path: ${input.manifestPath}
-Repository root: ${input.repoRoot}
-
-Please generate all documentation files from scratch based on the current codebase.
-Each document should follow its defined purpose and strategy.
-
-Report which files were created and any that were skipped.`;
+Write each document using the Write tool. Include:
+- Overview and purpose
+- Architecture with Mermaid diagrams where helpful
+- API endpoints (if controllers/handlers exist)
+- Business logic and key methods (if services exist)
+- Data model with types and relationships (if models/entities exist)
+- Data flow and inter-module dependencies
+${sourceSection}
+After writing, output "Created: <path>" for each file.`;
   }
 
   private parseUpdateOutput(
@@ -160,24 +283,14 @@ Report which files were created and any that were skipped.`;
     const skippedDocs: { path: string; reason: string }[] = [];
     const reviewSuggested: string[] = [];
 
-    // Parse stdout for file operations
-    const editedPattern = /(?:Updated|Edited|Modified):\s*(.+\.md)/gi;
-    const writtenPattern = /(?:Created|Written|Wrote):\s*(.+\.md)/gi;
+    const editedPattern = /(?:Updated|Edited|Modified|Created|Written|Wrote):\s*(.+\.md)/gi;
     const skippedPattern = /Skipped:\s*(.+\.md)(?:\s*-\s*(.+))?/gi;
     const reviewPattern = /(?:Review|Check):\s*(.+\.md)/gi;
 
     const output = stdout + stderr;
-
     let match;
 
     while ((match = editedPattern.exec(output)) !== null) {
-      const docPath = match[1].trim();
-      if (!updatedDocs.includes(docPath)) {
-        updatedDocs.push(docPath);
-      }
-    }
-
-    while ((match = writtenPattern.exec(output)) !== null) {
       const docPath = match[1].trim();
       if (!updatedDocs.includes(docPath)) {
         updatedDocs.push(docPath);
@@ -197,7 +310,6 @@ Report which files were created and any that were skipped.`;
       }
     }
 
-    // If no explicit updates found, check if any affected docs exist in output
     if (updatedDocs.length === 0) {
       for (const doc of affectedDocs) {
         if (output.includes(doc.docPath)) {
@@ -206,13 +318,11 @@ Report which files were created and any that were skipped.`;
       }
     }
 
-    const summary = this.generateUpdateSummary(updatedDocs, skippedDocs, reviewSuggested);
-
     return {
       updatedDocs,
       skippedDocs,
       reviewSuggested,
-      summary,
+      summary: this.generateUpdateSummary(updatedDocs, skippedDocs, reviewSuggested),
     };
   }
 
@@ -225,8 +335,6 @@ Report which files were created and any that were skipped.`;
     const skippedMappings: { id: string; reason: string }[] = [];
 
     const output = stdout + stderr;
-
-    // Parse for created/written files
     const createdPattern = /(?:Created|Written|Wrote|Generated):\s*(.+\.md)/gi;
     const skippedPattern = /Skipped:\s*(.+?)(?:\s*-\s*(.+))?$/gim;
 
@@ -242,18 +350,12 @@ Report which files were created and any that were skipped.`;
     while ((match = skippedPattern.exec(output)) !== null) {
       const identifier = match[1].trim();
       const reason = match[2]?.trim() || 'No reason provided';
-
-      // Try to match to a mapping ID
-      const mapping = mappings.find(
-        (m) => m.id === identifier || m.doc === identifier
-      );
-
+      const mapping = mappings.find(m => m.id === identifier || m.doc === identifier);
       if (mapping) {
         skippedMappings.push({ id: mapping.id, reason });
       }
     }
 
-    // If no explicit creations found, check if any mapping docs exist in output
     if (createdDocs.length === 0) {
       for (const mapping of mappings) {
         if (output.includes(mapping.doc)) {
@@ -262,12 +364,10 @@ Report which files were created and any that were skipped.`;
       }
     }
 
-    const summary = this.generateBootstrapSummary(createdDocs, skippedMappings);
-
     return {
       createdDocs,
       skippedMappings,
-      summary,
+      summary: this.generateBootstrapSummary(createdDocs, skippedMappings),
     };
   }
 
@@ -277,24 +377,10 @@ Report which files were created and any that were skipped.`;
     reviewSuggested: string[]
   ): string {
     const parts: string[] = [];
-
-    if (updatedDocs.length > 0) {
-      parts.push(`Updated ${updatedDocs.length} document(s)`);
-    }
-
-    if (skippedDocs.length > 0) {
-      parts.push(`skipped ${skippedDocs.length}`);
-    }
-
-    if (reviewSuggested.length > 0) {
-      parts.push(`${reviewSuggested.length} need review`);
-    }
-
-    if (parts.length === 0) {
-      return 'No documentation updates performed';
-    }
-
-    return parts.join(', ');
+    if (updatedDocs.length > 0) parts.push(`Updated ${updatedDocs.length} document(s)`);
+    if (skippedDocs.length > 0) parts.push(`skipped ${skippedDocs.length}`);
+    if (reviewSuggested.length > 0) parts.push(`${reviewSuggested.length} need review`);
+    return parts.length === 0 ? 'No documentation updates performed' : parts.join(', ');
   }
 
   private generateBootstrapSummary(
@@ -302,19 +388,8 @@ Report which files were created and any that were skipped.`;
     skippedMappings: { id: string; reason: string }[]
   ): string {
     const parts: string[] = [];
-
-    if (createdDocs.length > 0) {
-      parts.push(`Created ${createdDocs.length} document(s)`);
-    }
-
-    if (skippedMappings.length > 0) {
-      parts.push(`skipped ${skippedMappings.length} mapping(s)`);
-    }
-
-    if (parts.length === 0) {
-      return 'No documentation created';
-    }
-
-    return parts.join(', ');
+    if (createdDocs.length > 0) parts.push(`Created ${createdDocs.length} document(s)`);
+    if (skippedMappings.length > 0) parts.push(`skipped ${skippedMappings.length} mapping(s)`);
+    return parts.length === 0 ? 'No documentation created' : parts.join(', ');
   }
 }

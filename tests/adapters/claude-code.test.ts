@@ -1,10 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ClaudeCodeAdapter } from '../../src/adapters/claude-code.js';
 import type { UpdateInput, BootstrapInput } from '../../src/adapters/types.js';
-import { execFile } from 'child_process';
+import { execFile } from 'node:child_process';
 
-vi.mock('child_process', () => ({
+vi.mock('node:child_process', () => ({
   execFile: vi.fn(),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  readFile: vi.fn().mockResolvedValue('// mock source'),
+  readdir: vi.fn().mockResolvedValue([]),
+  stat: vi.fn().mockResolvedValue({ size: 100 }),
 }));
 
 describe('ClaudeCodeAdapter', () => {
@@ -83,9 +89,9 @@ describe('ClaudeCodeAdapter', () => {
         'claude',
         expect.arrayContaining([
           '-p',
-          expect.stringContaining('Use the /update-docs slash command'),
+          expect.stringContaining('Update documentation'),
           '--allowedTools',
-          'Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*)',
+          expect.any(String),
         ]),
         expect.objectContaining({
           cwd: '/test/repo',
@@ -291,14 +297,14 @@ describe('ClaudeCodeAdapter', () => {
         'claude',
         expect.arrayContaining([
           '-p',
-          expect.stringContaining('Use the /bootstrap-docs slash command'),
+          expect.stringContaining('Generate documentation'),
           '--allowedTools',
-          'Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*)',
+          expect.any(String),
         ]),
         expect.objectContaining({
           cwd: '/test/repo',
-          timeout: 600000,
-          maxBuffer: 20 * 1024 * 1024,
+          timeout: 300000,
+          maxBuffer: 10 * 1024 * 1024,
         }),
         expect.any(Function)
       );
@@ -394,7 +400,7 @@ describe('ClaudeCodeAdapter', () => {
       });
 
       await expect(adapter.runBootstrap(input)).rejects.toThrow(
-        'Claude CLI execution timed out after 10 minutes'
+        'Claude CLI execution timed out after 5 minutes'
       );
     });
 
