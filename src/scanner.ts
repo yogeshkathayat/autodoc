@@ -281,36 +281,82 @@ async function scanLaravelModules(repoRoot: string): Promise<ScannedModule[]> {
 
   const entries = await fs.readdir(controllersPath, { withFileTypes: true });
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+  // Check if controllers are in subdirectories (e.g. API/, Admin/)
+  const subDirs = entries.filter(e => e.isDirectory());
+  const rootControllers = entries.filter(e => e.isFile() && e.name.endsWith('.php') && e.name !== 'Controller.php');
 
-    const modulePath = join(controllersPath, entry.name);
-    const relPath = relative(repoRoot, modulePath);
-    const controllerFiles = await scanDirectory(modulePath);
+  // Scan for models and services at app level
+  const modelsPath = join(repoRoot, 'app', 'Models');
+  const servicesPath = join(repoRoot, 'app', 'Services');
+  const hasModels = await fileExists(modelsPath);
+  const hasServices = await fileExists(servicesPath);
 
-    // Find corresponding models and services
-    const modelPath = join(repoRoot, 'app', 'Models');
-    const servicePath = join(repoRoot, 'app', 'Services', entry.name);
+  if (subDirs.length > 0) {
+    // Group by controller subdirectory
+    for (const entry of subDirs) {
+      const modulePath = join(controllersPath, entry.name);
+      const controllerFiles = await scanDirectory(modulePath);
+      const allFiles = [...controllerFiles];
 
-    const hasServices = await fileExists(servicePath);
-    const hasEntities = await fileExists(modelPath);
+      // Include models and services in each module's context
+      if (hasModels) {
+        const modelFiles = await scanDirectory(modelsPath);
+        allFiles.push(...modelFiles);
+      }
+      if (hasServices) {
+        const serviceFiles = await scanDirectory(servicesPath);
+        allFiles.push(...serviceFiles);
+      }
 
-    const allFiles = [...controllerFiles];
-    if (hasServices) {
-      const serviceFiles = await scanDirectory(servicePath);
-      allFiles.push(...serviceFiles);
+      modules.push({
+        name: entry.name.toLowerCase(),
+        path: relative(repoRoot, modulePath),
+        files: allFiles.map(f => relative(repoRoot, f)),
+        hasControllers: true,
+        hasServices,
+        hasEntities: hasModels,
+        hasSubmodules: false,
+        submodules: [],
+      });
     }
+  }
+
+  // If controllers are flat (no subdirectories), create modules by grouping:
+  // routes, models, services as separate feature docs
+  if (subDirs.length === 0 || rootControllers.length > 0) {
+    const allAppFiles = await scanDirectory(join(repoRoot, 'app'));
+    const routeFiles = await fileExists(join(repoRoot, 'routes'))
+      ? await scanDirectory(join(repoRoot, 'routes'))
+      : [];
 
     modules.push({
-      name: entry.name.toLowerCase(),
-      path: relPath,
-      files: allFiles.map(f => relative(repoRoot, f)),
+      name: 'application',
+      path: 'app',
+      files: [...allAppFiles, ...routeFiles].map(f => relative(repoRoot, f)),
       hasControllers: true,
       hasServices,
-      hasEntities,
+      hasEntities: hasModels,
       hasSubmodules: false,
       submodules: [],
     });
+  }
+
+  // Add routes as a separate module if route files exist
+  const routesPath = join(repoRoot, 'routes');
+  if (await fileExists(routesPath)) {
+    const routeFiles = await scanDirectory(routesPath);
+    if (routeFiles.length > 0) {
+      modules.push({
+        name: 'routes',
+        path: 'routes',
+        files: routeFiles.map(f => relative(repoRoot, f)),
+        hasControllers: false,
+        hasServices: false,
+        hasEntities: false,
+        hasSubmodules: false,
+        submodules: [],
+      });
+    }
   }
 
   return modules;
@@ -324,41 +370,79 @@ async function scanGenericModules(repoRoot: string): Promise<ScannedModule[]> {
 
   // Try src/ first, then lib/
   let basePath = join(repoRoot, 'src');
-  if (!(await fileExists(basePath))) {
+  let foundSrcOrLib = await fileExists(basePath);
+  if (!foundSrcOrLib) {
     basePath = join(repoRoot, 'lib');
-    if (!(await fileExists(basePath))) {
-      return modules;
-    }
+    foundSrcOrLib = await fileExists(basePath);
   }
 
-  const entries = await fs.readdir(basePath, { withFileTypes: true });
+  if (foundSrcOrLib) {
+    const entries = await fs.readdir(basePath, { withFileTypes: true });
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (SKIP_DIRS.has(entry.name)) continue;
 
-    // Skip common/shared directories
-    if (entry.name === 'common' || entry.name === 'shared' || entry.name === 'utils') {
-      continue;
+      const modulePath = join(basePath, entry.name);
+      const relPath = relative(repoRoot, modulePath);
+      const files = await scanDirectory(modulePath);
+
+      modules.push({
+        name: entry.name,
+        path: relPath,
+        files: files.map(f => relative(repoRoot, f)),
+        hasControllers: files.some(f => f.includes('controller')),
+        hasServices: files.some(f => f.includes('service')),
+        hasEntities: files.some(f => f.includes('model') || f.includes('entity')),
+        hasSubmodules: false,
+        submodules: [],
+      });
     }
 
-    const modulePath = join(basePath, entry.name);
-    const relPath = relative(repoRoot, modulePath);
-    const files = await scanDirectory(modulePath);
+    return modules;
+  }
 
-    modules.push({
-      name: entry.name,
-      path: relPath,
-      files: files.map(f => relative(repoRoot, f)),
-      hasControllers: false,
-      hasServices: false,
-      hasEntities: false,
-      hasSubmodules: false,
-      submodules: [],
-    });
+  // Fallback: scan root-level feature directories (Go, Python, etc.)
+  // Look for known feature-dir patterns at the repo root
+  const FEATURE_DIRS = [
+    'controllers', 'services', 'models', 'repositories',
+    'handlers', 'middleware', 'routes', 'dto', 'entities',
+    'pkg', 'internal', 'cmd', 'jobs', 'workers', 'events',
+    'api', 'core', 'domain', 'adapters', 'ports',
+  ];
+
+  const rootEntries = await fs.readdir(repoRoot, { withFileTypes: true });
+  const foundFeatureDirs = rootEntries.filter(
+    e => e.isDirectory() && FEATURE_DIRS.includes(e.name)
+  );
+
+  if (foundFeatureDirs.length > 0) {
+    // Group root-level dirs into logical modules
+    for (const entry of foundFeatureDirs) {
+      const modulePath = join(repoRoot, entry.name);
+      const files = await scanDirectory(modulePath);
+      if (files.length === 0) continue;
+
+      modules.push({
+        name: entry.name,
+        path: entry.name,
+        files: files.map(f => relative(repoRoot, f)),
+        hasControllers: entry.name === 'controllers' || entry.name === 'handlers',
+        hasServices: entry.name === 'services',
+        hasEntities: entry.name === 'models' || entry.name === 'entities',
+        hasSubmodules: false,
+        submodules: [],
+      });
+    }
   }
 
   return modules;
 }
+
+const SKIP_DIRS = new Set([
+  'common', 'shared', 'utils', 'helpers', 'types',
+  'config', 'constants', 'assets', 'public', 'static',
+]);
 
 /**
  * Detects common/shared directories in the repository.
@@ -548,7 +632,13 @@ function buildModulePurpose(module: ScannedModule, framework: string): string {
  * Builds watch patterns for a module based on its path and framework.
  */
 function buildModuleWatches(module: ScannedModule, framework: string): string[] {
-  const ext = framework === 'laravel' ? 'php' : 'ts';
+  const extMap: Record<string, string> = {
+    nestjs: 'ts',
+    nextjs: '{ts,tsx}',
+    laravel: 'php',
+    generic: '*',
+  };
+  const ext = extMap[framework] || '*';
   return [`${module.path}/**/*.${ext}`];
 }
 
